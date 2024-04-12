@@ -5,12 +5,13 @@ import bcrypt from "bcrypt";
 import session from "express-session";
 import passport from "passport";
 import { Strategy } from "passport-local";
+import GoogleStrategy from "passport-google-oauth2";
 import env from "dotenv";
 
 const app = express();
 const port = 3000;
 const saltRounds = 10;
-env.config(); // intialise the dotenv package
+env.config(); // intialize the dotenv package
 
 app.use(bodyParser.urlencoded({ extended: true })); // parse form data
 app.use(express.static("public")); //serve static files from public folder
@@ -53,9 +54,8 @@ app.get("/register", (req, res) => {
 
 app.get("/logout", (req, res) => {
   req.logout(function (err) {
-    if (err) {
-      return next(err); //pas control into the next error handler, return to the previous page
-    }
+    if (err) return next(err); //pass control into the next error handler, return to the previous page
+
     res.redirect("/");
   });
 });
@@ -65,10 +65,29 @@ app.get("/secrets", (req, res) => {
   if (req.isAuthenticated()) {
     res.render("secrets.ejs");
   } else {
+    console.log("Not authenticated");
     res.redirect("/login");
   }
 });
 
+//google authentication route to authenticate user and grant user access to user's google profile, email
+app.get(
+  "/auth/google",
+  passport.authenticate("google", {
+    scope: ["profile", "email"],
+  })
+);
+
+//use the google to authenticate user and redirect to secrets page if successful otherwise redirect to login page
+app.get(
+  "/auth/google/secrets",
+  passport.authenticate("google", {
+    successRedirect: "/secrets", //redirect to the secrets page
+    failureRedirect: "/login", //redirect to the login page
+  })
+);
+
+//login route, authenticate the user and redirect to the secrets page if successful otherwise redirect to login page
 app.post(
   "/login",
   passport.authenticate("local", {
@@ -116,6 +135,7 @@ app.post("/register", async (req, res) => {
 
 //verify the password and username, compare the password input from user and th stored password in database
 passport.use(
+  "local",
   new Strategy(async function verify(username, password, cb) {
     try {
       const result = await db.query("SELECT * FROM users WHERE email = $1", [
@@ -146,12 +166,44 @@ passport.use(
   })
 );
 
+passport.use(
+  "google",
+  new GoogleStrategy(
+    {
+      clientID: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      callbackURL: "http://localhost:3000/auth/google/secrets",
+      userProfileURL: "https://www.googleapis.com/oauth2/v3/userinfo",
+    },
+    async (accessToken, refreshToken, profile, cb) => {
+      try {
+        console.log(profile);
+        const result = await db.query("SELECT * FROM users WHERE email = $1", [
+          profile.email,
+        ]);
+        if (result.rows.length === 0) {
+          //if user does not exist
+          const newUser = await db.query(
+            "INSERT INTO users (email, password) VALUES ($1, $2)",
+            [profile.email, "google"]
+          );
+          return cb(null, newUser.rows[0]); //return the new user
+        } else {
+          return cb(null, result.rows[0]); //return the existing user
+        }
+      } catch (err) {
+        console.log(err);
+      }
+    }
+  )
+);
 passport.serializeUser((user, cb) => {
+  //
   cb(null, user);
 });
 passport.deserializeUser((user, cb) => {
   cb(null, user);
 });
 app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+  console.log(`Server running on port http://localhost:${port}`);
 });
