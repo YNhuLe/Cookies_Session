@@ -60,16 +60,41 @@ app.get("/logout", (req, res) => {
   });
 });
 
-app.get("/secrets", (req, res) => {
+app.get("/secrets", async (req, res) => {
   //console.log(req.user);
   if (req.isAuthenticated()) {
-    res.render("secrets.ejs");
+    //TODO: update pull in the user secrets to render in secrets.ejs
+    try {
+      const result = await db.query(
+        "SELECT secret FROM users WHERE email = $1",
+        [req.user.email]
+      );
+      console.log(result);
+      const secret = result.rows[0].secret;
+      if (secret) {
+        res.render("secrets.ejs", { secret: secret }); //render the secrets page and display the secret on secret ejs tag
+      } else {
+        res.render("secrets.ejs", { secret: "You should submit a secret!!!" });
+      }
+    } catch (err) {
+      console.log(err);
+    }
   } else {
     console.log("Not authenticated");
     res.redirect("/login");
   }
 });
 
+////////////////////////////GET SUBMIT ROUTE/////////////////////////////
+//TODO: Add a get route for the submit button
+app.get("/submit", (req, res) => {
+  if (req.isAuthenticated()) {
+    // only allow user to submit the secret if they are authenticated
+    res.render("submit.ejs");
+  } else {
+    res.redirect("login.ejs"); // otherwise redirect to login page
+  }
+});
 //google authentication route to authenticate user and grant user access to user's google profile, email
 app.get(
   "/auth/google",
@@ -86,6 +111,22 @@ app.get(
     failureRedirect: "/login", //redirect to the login page
   })
 );
+
+//TODO: create the post route for submit
+app.post("/submit", async (req, res) => {
+  const secret = req.body.secret; // get the secret the user input from the form
+  console.log(req.user); // get the user information
+
+  try {
+    await db.query("UPDATE users SET secret = $1 WHERE email = $2", [
+      secret,
+      req.user.email,
+    ]); //update the user secret in the database
+    res.redirect("/secrets"); //redirect to the secrets page so user can see their secret
+  } catch (err) {
+    console.log(err);
+  }
+});
 
 //login route, authenticate the user and redirect to the secrets page if successful otherwise redirect to login page
 app.post(
